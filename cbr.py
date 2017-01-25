@@ -3,6 +3,8 @@ import numpy as np
 import math
 import time
 import pickle
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import AdaBoostClassifier
 from collections import Counter
 
 #1. Read and Store in CaseBase and normalize numerical attributes
@@ -25,8 +27,6 @@ def read_cb(data_name):
 
     #get types of features from metadata
     meta_data = scparff.loadarff(FILE_NAME_START+"0"+FILE_NAME_END_TRAIN)[1]
-    types = np.asarray(meta_data.types())[:-1]
-    types_numeric = np.where(types == 'numeric')[0]
 
     for i in range(10):
         ###read the data and store in a case base (aka numpy array)###
@@ -44,51 +44,29 @@ def read_cb(data_name):
         #convert case base from list to numpy array
         train_case_base = np.asarray(train_case_base)
         test_case_base = np.asarray(test_case_base)
-
-        #normalize the data
-        min_vals, max_vals = {},{}
-        for j in types_numeric:
-            vals = [case[0][j] for case in train_case_base if not math.isnan(case[0][j])]
-            if vals:
-                min_val = min(vals)
-                max_val = max(vals)
-            else:
-                print "oh no"
-                min_val = 0
-                max_val = 1
-
-            for k in range(len(train_case_base)):
-                train_case_base[k][0][j] = (float(train_case_base[k][0][j]) - min_val) / (max_val - min_val)
-
-            #store min_val and max_val for later use
-            min_vals[j] = min_val
-            max_vals[j] = max_val
-
-        data[i] = (train_case_base, test_case_base, min_vals, max_vals)
+        data[i] = (train_case_base, test_case_base)
 
     return meta_data, data
+
+
+#for future generations
+#def normalize(self, case):
+    #for j in self.types_numeric:
+        #case[j] = (float(case[j]) - self.min_vals[j]) / (self.max_vals[j] - self.min_vals[j])
+    #return case
 
 
 #--------------------------------------------------------------------------------------------------------------#
 #2. Case Based Reasoner
 class caseBasedReasoner:
 
-    def __init__(self, train_case_base, meta_data, min_vals, max_vals):
+    def __init__(self, train_case_base, meta_data, weights):
         self.case_memory = np.asarray([[case[0], case[1], [0.5], [0.5]] for case in train_case_base])
         self.case_base = train_case_base
         self.meta_data = meta_data
         self.types = np.asarray(self.meta_data.types())[:-1]
         self.types_numeric = np.where(self.types == 'numeric')[0]
-        self.min_vals = min_vals
-        self.max_vals = max_vals
-        self.weights = [1]*len(self.types)
-
-
-    ##### a) Retrieval #####
-    def normalize(self, case):
-        for j in self.types_numeric:
-            case[j] = (float(case[j]) - self.min_vals[j]) / (self.max_vals[j] - self.min_vals[j])
-        return case
+        self.weights = weights
 
     #Computes the distance of two elements x1, x2
     def column_distance(self, x1, x2, type):
@@ -110,8 +88,7 @@ class caseBasedReasoner:
             return math.sqrt(dist)
 
     #Selects and returns the k most similar cases to current_instance within the train_case_base
-    def acbr_retrieval_phase(self, current_instance, k=3):
-        current_instance = self.normalize(current_instance)
+    def acbr_retrieval_phase(self, current_instance, k):
         #compute euclidian distance for each case
         dists = np.asarray([self.euclidian_distance(current_instance, case[0]) for case in self.case_memory])
         #return the k best cases
@@ -214,9 +191,6 @@ class caseBasedReasoner:
         use_oblivion = cycle_type.endswith("O")
         retention_strategy = cycle_type[:2]
 
-        print retention_strategy
-        print use_oblivion
-
         if use_weighting:
             candidates = self.weighted_acbr_retrieval_phase(new_case[0], k)
         else:
@@ -240,11 +214,15 @@ class caseBasedReasoner:
 
     # --------------------------------------------------------------------------------------------------------------#
     # 3. Weighted ACBR with FS - todo
-    def compute_weights(self):
+
+    def weighted_euclidian_distance(self, X1, X2):
         pass
 
-    def weighted_acbr_retrieval_phase(self):
-        pass
+    def weighted_acbr_retrieval_phase(self, current_instance, k):
+        #compute euclidian distance for each case
+        dists = np.asarray([self.euclidian_distance(current_instance, case[0]) for case in self.case_memory])
+        #return the k best cases
+        return self.case_memory[np.argpartition(dists, k)[:k]]
 
     # --------------------------------------------------------------------------------------------------------------#
 
@@ -268,27 +246,137 @@ class caseBasedReasoner:
         return accuracy, efficiency, case_base_size
 
 
-def test(data_name, cycle_type='NR', k=3, use_weighting=False):
+def test(data_name, cycle_type='NR', k=3, weighting=None):
     meta, data = read_cb(data_name)
+    weights = [1]*len(meta.types())
+    use_weighting = False
+    normalize(data, meta)
+
+    if weighting:
+        computed_weights = get_weights(data, meta)
+        if weighting == "rf":
+            weights = computed_weights[0]
+
+        if weighting == "adaboost":
+            weights = computed_weights[1]
+
     results = []
 
     for split in data:
-        train_case_base, test_case_base, min_vals, max_vals = split
-        cbr = caseBasedReasoner(train_case_base, meta, min_vals, max_vals)
+        train_case_base, test_case_base = split
+        cbr = caseBasedReasoner(train_case_base, meta, weights)
         results.append(cbr.test_cycle(test_case_base, cycle_type, k, use_weighting))
 
     results = np.asarray(results)
     return results.mean(0)
 
 
+def meta_info(arff_meta):
+    # auxiliary function to parse (feature name, feature type[, range of values (for categorical data)])
+    meta_str = str(arff_meta)
+    parsed_lines = [l.strip().split("'s type is ") for l in meta_str.split('\n') if 'type' in l]
+    cleaned_lines = [(name, type_range.split(', range is')) for name, type_range in parsed_lines]
+    final_lines = [(name, t_r[0]) if len(t_r) == 1 else  (name, t_r[0], t_r[1].translate(None, "(){}' ").split(','))
+                   for name, t_r in cleaned_lines]
+    final_mapping = [n_t_r if len(n_t_r) == 2 else (n_t_r[0], n_t_r[1], {val: k for k, val in enumerate(n_t_r[2])})
+                     for n_t_r in final_lines]
+
+    return final_mapping
 
 
+def normalize(data, meta_data):
+    extra_meta_data = meta_info(meta_data)
+
+    # normalize the data
+    train = data[0][0]
+    test = data[0][1]
+    case_base = np.vstack([train, test])
+
+    types = np.asarray(meta_data.types())[:-1]
+    types_numeric = np.where(types == 'numeric')[0]
+
+    min_vals, max_vals = {}, {}
+    for j in types_numeric:
+        vals = [case[0][j] for case in case_base if not math.isnan(case[0][j])]
+        if vals:
+            min_val = min(vals)
+            max_val = max(vals)
+        else:
+            min_val = 0
+            max_val = 1
+
+        for (train_case_base, test_case_base) in data:
+            for k in range(len(train_case_base)):
+                if not math.isnan(train_case_base[k][0][j]):
+                    train_case_base[k][0][j] = (float(train_case_base[k][0][j]) - min_val) / (max_val - min_val)
+                else:
+                    train_case_base[k][0][j] = (max_val + min_val)/2
+
+            for k in range(len(test_case_base)):
+                if not math.isnan(test_case_base[k][0][j]):
+                    test_case_base[k][0][j] = (float(test_case_base[k][0][j]) - min_val) / (max_val - min_val)
+                else:
+                    test_case_base[k][0][j] = (max_val + min_val)/2
+
+        # store min_val and max_val for later use
+        min_vals[j] = min_val
+        max_vals[j] = max_val
+
+    types_nominal = np.where(types == 'nominal')[0]
+    for j in types_nominal:
+        categories = extra_meta_data[j][2]
+        for (train_case_base, test_case_base) in data:
+            for k in range(len(train_case_base)):
+                key = train_case_base[k][0][j]
+                if key != "?":
+                    train_case_base[k][0][j] = categories[key]
+                else:
+                    train_case_base[k][0][j] = -1
+
+            for k in range(len(test_case_base)):
+                key = test_case_base[k][0][j]
+                if key != "?":
+                    test_case_base[k][0][j] = categories[key]
+                else:
+                    test_case_base[k][0][j] = -1
+
+
+def get_weights(data, meta_data):
+    train = data[0][0]
+    test = data[0][1]
+    case_base = np.vstack([train, test])
+
+    X = np.asarray([case[0] for case in case_base])
+    Y = np.asarray([float(case[1][0]) for case in case_base])
+    names = meta_data.names()
+
+    rfc = RandomForestClassifier(n_estimators=20, criterion='gini', min_samples_split=2, random_state=0)
+    rfc.fit(X, Y, sample_weight=None)
+    rfc_feat_weights = rfc.feature_importances_
+
+    abc = AdaBoostClassifier(base_estimator=None, n_estimators=10, learning_rate=0.6, algorithm='SAMME.R',
+                             random_state=0)
+    abc.fit(X, Y, sample_weight=None);
+    abc_feat_weights = abc.feature_importances_
+
+    return rfc_feat_weights, abc_feat_weights
 
 ##### UNIT TESTS #####
 
 #READING
-#data_name = "autos"
+#data_name = "satimage"
 #meta, data = read_cb(data_name)
+#normalize(data, meta)
+#rfc_feat_weights, abc_feat_weights = get_weights(data, meta)
+
+#for p in sorted(enumerate(rfc_feat_weights), key=lambda x: x[1], reverse=True):
+#    print(p)
+#print "-----------------------------------"
+
+#for p in sorted(enumerate(abc_feat_weights), key=lambda x: x[1], reverse=True):
+#    print(p)
+
+
 #types, types_numeric = meta
 #train_case_base, test_case_base, min_vals, max_vals = data[0]
 #case1 = test_case_base[0]
@@ -325,7 +413,7 @@ def test(data_name, cycle_type='NR', k=3, use_weighting=False):
 
 #test_cycle(), test()
 #print cbr.test_cycle(test_case_base, 'acbr')
-print test("autos", "DS")
+print test("autos", "DDO")
 #print cbr.case_memory[-1]
 
 
@@ -341,6 +429,15 @@ def read_from_file(filename):
     with open(filename, 'rb') as file:
         return pickle.load(file)
 
+def friedman_test(results, critical_level):
+    n = len(results)
+    k = len(results[0])
+    xi = 12*n / k*(k-1)
+
+
+def nemenyi_test(results, critical_level):
+    pass
+
 ## k ##
 #results = []
 
@@ -350,9 +447,10 @@ def read_from_file(filename):
 #for dataset in datasets:
     #result = []
     #for k in ks:
-        #result.append(test("NR", k=k))
+        #result.append(test(dataset, k=k))
+    #results.append(result)
 
-#store_to_file(results, "k")
+#store_to_file(results, "experiments_k")
 
 ## cycle types ##
 #cycle_types = ["NR", "DS", "DD", "DE", "DD-O", "DE-O"]
