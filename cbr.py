@@ -48,8 +48,13 @@ def read_cb(data_name):
         min_vals, max_vals = {},{}
         for j in types_numeric:
             vals = [case[0][j] for case in train_case_base if not math.isnan(case[0][j])]
-            min_val = min(vals)
-            max_val = max(vals)
+            if vals:
+                min_val = min(vals)
+                max_val = max(vals)
+            else:
+                print "oh no"
+                min_val = 0
+                max_val = 1
 
             for k in range(len(train_case_base)):
                 train_case_base[k][0][j] = (float(train_case_base[k][0][j]) - min_val) / (max_val - min_val)
@@ -88,17 +93,19 @@ class caseBasedReasoner:
             if math.isnan(x1) or math.isnan(x2):
                 return 1
             return x1-x2
-        if type=="nominal":
+        else:
             return 0.0 if x1==x2 else 1.0
 
     #Computes the Euclidian distance for two arrays X1,X2
     def euclidian_distance(self, X1, X2):
-        dist = 0.0
-        for i in range(len(types)):
-            dist += self.column_distance(X1[i], X2[i], self.types[i])**2
-        return math.sqrt(dist)
+        if len(self.types) == len(self.types_numeric):
+            return np.linalg.norm(np.asarray(X1)-np.asarray(X2))
+        else:
+            dist = 0.0
+            for i in range(len(self.types)):
+                dist += self.column_distance(X1[i], X2[i], self.types[i])**2
+            return math.sqrt(dist)
 
-    #todo: compare different values of k
     #Selects and returns the k most similar cases to current_instance within the train_case_base
     def acbr_retrieval_phase(self, current_instance, k=3):
         current_instance = self.normalize(current_instance)
@@ -133,7 +140,6 @@ class caseBasedReasoner:
         true_class = current_instance[1][0]
         storage.append(true_class == prediction[0])
 
-    #todo: compare different values of alpha
     #d) Review
     def acbr_review_phase(self, new_case, candidates, alpha):
         true_class = new_case[1][0]
@@ -143,8 +149,7 @@ class caseBasedReasoner:
             #update goodness
             r = 1 if candidate[1][0] == true_class else 0
             goodness = goodness + alpha * (r-goodness)
-            #todo: fix line below. probably not working if there are two similar cases in the case base
-            index = self.case_memory.tolist().index(candidate)
+            index = self.case_memory.tolist().index(candidate.tolist())
             candidate[3] = [goodness]
             self.case_memory[index] = candidate
 
@@ -197,20 +202,37 @@ class caseBasedReasoner:
 
 
     # f) Comparison: CBR - ACBR
+    #todo: compare different values of k
+    #todo: compare different values of alpha
     #todo: Compare no retention to always retention
-    def cbr_cycle(self, new_case, storage):
-        candidates = self.acbr_retrieval_phase(new_case[0])
-        prediction = self.acbr_reuse_phase(new_case[0], candidates)
-        self.acbr_revision_phase(new_case, prediction, storage)
-        self.acbr_always_retention_phase(new_case)
-
     #todo: Compare different versions of the acbr cycle (i.e. DD-O vs DD, etc.)
-    def acbr_cycle(self, new_case, storage):
-        candidates = self.acbr_retrieval_phase(new_case[0])
+    def acbr_cycle(self, new_case, storage, cycle_type, k, use_weighting):
+
+        use_oblivion = cycle_type.endswith("O")
+        retention_strategy = cycle_type[:2]
+
+        print retention_strategy
+        print use_oblivion
+
+        if use_weighting:
+            candidates = self.weighted_acbr_retrieval_phase(new_case[0], k)
+        else:
+            candidates = self.acbr_retrieval_phase(new_case[0], k)
+
         prediction = self.acbr_reuse_phase(new_case[0], candidates)
         self.acbr_revision_phase(new_case, prediction, storage)
-        self.acbr_review_phase(new_case, candidates, 0)
-        self.acbr_always_retention_phase(new_case)
+
+        if use_oblivion:
+            self.acbr_review_phase(new_case, candidates, 1)
+
+        if retention_strategy == "DS":
+            self.acbr_always_retention_phase(new_case)
+        elif retention_strategy == "DD":
+            self.acbr_dd_retention_phase(new_case, candidates)
+        elif retention_strategy == "DE":
+            self.acbr_de_retention_phase(new_case, candidates, prediction)
+        else:
+            self.acbr_no_retention_phase(new_case)
 
 
     # --------------------------------------------------------------------------------------------------------------#
@@ -218,21 +240,13 @@ class caseBasedReasoner:
     def weighted_acbr_retrieval_phase(self):
         pass
 
-    def weighted_acbr_cycle(self, case, storage):
-        pass
-
     # --------------------------------------------------------------------------------------------------------------#
 
-    def test_cycle(self, test_case_base, cycle_type='acbr'):
+    def test_cycle(self, test_case_base, cycle_type='NR', k=3, use_weighting=False):
         storage = []
         start_time = time.time()
         for case in test_case_base:
-            if cycle_type == 'acbr':
-                self.acbr_cycle(case, storage)
-            if cycle_type == 'cbr':
-                self.cbr_cycle(case, storage)
-            if cycle_type == 'weighted_acbr':
-                self.weighted_acbr_cycle(case, storage)
+            self.acbr_cycle(case, storage, cycle_type, k, use_weighting)
         end_time = time.time()
         accuracy = 1.0 * len(filter(lambda x: x == True, storage)) / len(storage)
         efficiency = end_time - start_time
@@ -241,7 +255,7 @@ class caseBasedReasoner:
         return accuracy, efficiency, case_base_size
 
 
-def test(data_name, cycle_type='acbr'):
+def test(data_name, cycle_type='NR'):
     meta, data = read_cb(data_name)
     types, types_numeric = meta
     results = []
@@ -259,13 +273,16 @@ def test(data_name, cycle_type='acbr'):
 ##### UNIT TESTS #####
 
 #READING
-data_name = "autos"
-meta, data = read_cb(data_name)
-types, types_numeric = meta
-train_case_base, test_case_base, min_vals, max_vals = data[0]
-case1 = test_case_base[0]
-case2 = test_case_base[1]
-cbr = caseBasedReasoner(train_case_base, types, types_numeric, min_vals, max_vals)
+#data_name = "autos"
+#meta, data = read_cb(data_name)
+#types, types_numeric = meta
+#train_case_base, test_case_base, min_vals, max_vals = data[0]
+#case1 = test_case_base[0]
+#case2 = test_case_base[1]
+#print types
+#print types_numeric
+
+#cbr = caseBasedReasoner(train_case_base, types, types_numeric, min_vals, max_vals)
 
 #RETRIEVAL, REUSE
 #cands = cbr.acbr_retrieval_phase(case1[0], 3)
@@ -294,5 +311,5 @@ cbr = caseBasedReasoner(train_case_base, types, types_numeric, min_vals, max_val
 
 #test_cycle(), test()
 #print cbr.test_cycle(test_case_base, 'acbr')
-print test("autos", "acbr")
+print test("credit-a", "NR")
 #print cbr.case_memory[-1]
