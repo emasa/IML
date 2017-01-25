@@ -2,6 +2,7 @@ import scipy.io.arff as scparff
 import numpy as np
 import math
 import time
+import pickle
 from collections import Counter
 
 #1. Read and Store in CaseBase and normalize numerical attributes
@@ -65,20 +66,22 @@ def read_cb(data_name):
 
         data[i] = (train_case_base, test_case_base, min_vals, max_vals)
 
-    return (types, types_numeric), data
+    return meta_data, data
 
 
 #--------------------------------------------------------------------------------------------------------------#
 #2. Case Based Reasoner
 class caseBasedReasoner:
 
-    def __init__(self, train_case_base, types, types_numeric, min_vals, max_vals):
+    def __init__(self, train_case_base, meta_data, min_vals, max_vals):
         self.case_memory = np.asarray([[case[0], case[1], [0.5], [0.5]] for case in train_case_base])
-        #self.case_base = train_case_base
-        self.types = types
-        self.types_numeric = types_numeric
+        self.case_base = train_case_base
+        self.meta_data = meta_data
+        self.types = np.asarray(self.meta_data.types())[:-1]
+        self.types_numeric = np.where(self.types == 'numeric')[0]
         self.min_vals = min_vals
         self.max_vals = max_vals
+        self.weights = [1]*len(self.types)
 
 
     ##### a) Retrieval #####
@@ -223,7 +226,7 @@ class caseBasedReasoner:
         self.acbr_revision_phase(new_case, prediction, storage)
 
         if use_oblivion:
-            self.acbr_review_phase(new_case, candidates, 1)
+            self.acbr_review_phase(new_case, candidates, 0.5)
 
         if retention_strategy == "DS":
             self.acbr_always_retention_phase(new_case)
@@ -237,17 +240,27 @@ class caseBasedReasoner:
 
     # --------------------------------------------------------------------------------------------------------------#
     # 3. Weighted ACBR with FS - todo
+    def compute_weights(self):
+        pass
+
     def weighted_acbr_retrieval_phase(self):
         pass
 
     # --------------------------------------------------------------------------------------------------------------#
 
-    def test_cycle(self, test_case_base, cycle_type='NR', k=3, use_weighting=False):
+    def test_cycle(self, test_case_base, cycle_type, k, use_weighting):
         storage = []
+
+        if use_weighting:
+            self.compute_weights()
+
         start_time = time.time()
+
         for case in test_case_base:
             self.acbr_cycle(case, storage, cycle_type, k, use_weighting)
+
         end_time = time.time()
+
         accuracy = 1.0 * len(filter(lambda x: x == True, storage)) / len(storage)
         efficiency = end_time - start_time
         case_base_size = len(self.case_memory)
@@ -255,14 +268,15 @@ class caseBasedReasoner:
         return accuracy, efficiency, case_base_size
 
 
-def test(data_name, cycle_type='NR'):
+def test(data_name, cycle_type='NR', k=3, use_weighting=False):
     meta, data = read_cb(data_name)
-    types, types_numeric = meta
     results = []
+
     for split in data:
         train_case_base, test_case_base, min_vals, max_vals = split
-        cbr = caseBasedReasoner(train_case_base, types, types_numeric, min_vals, max_vals)
-        results.append(cbr.test_cycle(test_case_base, cycle_type))
+        cbr = caseBasedReasoner(train_case_base, meta, min_vals, max_vals)
+        results.append(cbr.test_cycle(test_case_base, cycle_type, k, use_weighting))
+
     results = np.asarray(results)
     return results.mean(0)
 
@@ -311,5 +325,39 @@ def test(data_name, cycle_type='NR'):
 
 #test_cycle(), test()
 #print cbr.test_cycle(test_case_base, 'acbr')
-print test("credit-a", "NR")
+print test("autos", "DS")
 #print cbr.case_memory[-1]
+
+
+
+##### COMPARISONS #####
+datasets = ["credit-a", "satimage", "nursery"]
+
+def store_to_file(data, filename):
+    with open(filename, 'wb') as file:
+        pickle.dump(data, file)
+
+def read_from_file(filename):
+    with open(filename, 'rb') as file:
+        return pickle.load(file)
+
+## k ##
+#results = []
+
+#variables subject to testing
+#ks = [1, 3, 5, 7]
+
+#for dataset in datasets:
+    #result = []
+    #for k in ks:
+        #result.append(test("NR", k=k))
+
+#store_to_file(results, "k")
+
+## cycle types ##
+#cycle_types = ["NR", "DS", "DD", "DE", "DD-O", "DE-O"]
+
+#test = [[0, 1, 2], ['a', 'b', 'c']]
+#store_to_file(test, "test")
+#print read_from_file("test")
+
