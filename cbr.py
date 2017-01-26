@@ -213,14 +213,23 @@ class caseBasedReasoner:
 
 
     # --------------------------------------------------------------------------------------------------------------#
-    # 3. Weighted ACBR with FS - todo
+    # 3. Weighted ACBR with FS
 
     def weighted_euclidian_distance(self, X1, X2):
-        pass
+
+        if len(self.types) == len(self.types_numeric):
+            x, y, w = np.asarray(X1), np.asarray(X2), np.asarray(self.weights)
+            return np.linalg.norm(np.sqrt(w) * (x - y))
+
+        else:
+            dist = 0.0
+            for i in range(len(self.types)):
+                dist += self.weights[i] * self.column_distance(X1[i], X2[i], self.types[i])**2
+            return math.sqrt(dist)
 
     def weighted_acbr_retrieval_phase(self, current_instance, k):
         #compute euclidian distance for each case
-        dists = np.asarray([self.euclidian_distance(current_instance, case[0]) for case in self.case_memory])
+        dists = np.asarray([self.weighted_euclidian_distance(current_instance, case[0]) for case in self.case_memory])
         #return the k best cases
         return self.case_memory[np.argpartition(dists, k)[:k]]
 
@@ -228,9 +237,6 @@ class caseBasedReasoner:
 
     def test_cycle(self, test_case_base, cycle_type, k, use_weighting):
         storage = []
-
-        if use_weighting:
-            self.compute_weights()
 
         start_time = time.time()
 
@@ -254,6 +260,7 @@ def test(data_name, cycle_type='NR', k=3, weighting=None):
 
     if weighting:
         computed_weights = get_weights(data, meta)
+        use_weighting = True
         if weighting == "rf":
             weights = computed_weights[0]
 
@@ -356,7 +363,7 @@ def get_weights(data, meta_data):
 
     abc = AdaBoostClassifier(base_estimator=None, n_estimators=10, learning_rate=0.6, algorithm='SAMME.R',
                              random_state=0)
-    abc.fit(X, Y, sample_weight=None);
+    abc.fit(X, Y, sample_weight=None)
     abc_feat_weights = abc.feature_importances_
 
     return rfc_feat_weights, abc_feat_weights
