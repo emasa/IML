@@ -337,7 +337,7 @@ def get_weights(data, meta_data):
 #----------------------------------------------------------------------------------------------------------------------#
 #testing function
 
-def test(data_name, cycle_type='NR', k=3, weighting=None):
+def test(data_name, cycle_type='NR', k=5, weighting=None):
     meta, data = read_cb(data_name)
     weights = [1]*len(meta.types())
     use_weighting = False
@@ -431,14 +431,35 @@ def read_from_file(filename):
     with open(filename, 'rb') as file:
         return pickle.load(file)
 
+def compute_ranks(vals, reverse=False):
+    ranks = []
+    for dataset in vals:
+        dataset_sorted = sorted(dataset, reverse=reverse)
+        rank = [dataset_sorted.index(acc) for acc in dataset]
+        ranks.append(rank)
+    return ranks
+
 def compute_n_k_rs(results):
     n = len(results)
     print n
     k = len(results[0])
     print k
-    rs = [1.0 * sum([result[i][0] for result in results]) / n for i in range(k)]
-    print rs
+    accs = [[result[0] for result in dataset] for dataset in results]
+
+    av_accs = [1.0 * sum([dataset[i] for dataset in accs]) / n for i in range(k)]
+    print av_accs
+
+    ranks = compute_ranks(accs, True)
+
+    rs = [1.0 * sum([rank[i] for rank in ranks]) / n for i in range(k)]
     return n, k, rs
+
+def seperate_measures(results):
+    accs = [[result[0] for result in dataset] for dataset in results]
+    eff = [[result[1] for result in dataset] for dataset in results]
+    cbs = [[result[2] for result in dataset] for dataset in results]
+    return accs, eff, cbs
+
 
 def friedman_test(results):
     n, k, rs = compute_n_k_rs(results)
@@ -454,18 +475,19 @@ datasets = ["credit-a", "satimage", "nursery"]
 #datasets = ["autos", "autos", "autos"]
 
 # ## k ##
-results = []
-ks = [1, 3, 5, 7]
-for dataset in datasets:
-    result = []
-    for k in ks:
-        result.append(test(dataset, k=k))
-        print "finished a k"
-    results.append(result)
-    print "finished a dataset"
-store_to_file(results, "experiments_k")
+# results = []
+# ks = [1, 3, 5, 7]
+# for dataset in datasets:
+#     result = []
+#     for k in ks:
+#         result.append(test(dataset, k=k))
+#         print "finished a k"
+#     results.append(result)
+#     print "finished a dataset"
+# store_to_file(results, "experiments_k")
 
 #results = read_from_file("experiments_k")
+#print results
 #n,k,rs = compute_n_k_rs(results)
 
 #
@@ -475,18 +497,28 @@ store_to_file(results, "experiments_k")
 # for dataset in datasets:
 #     result = []
 #     for type in cycle_types:
-#         result.append(test(dataset, cycle_type=type))
+#         result.append(test(dataset, k=5, cycle_type=type))
+#         print "finished cycle"
 #     results.append(result)
+#     print "finished a dataset"
+#
 # store_to_file(results, "experiments_cycle_types")
+
+results = read_from_file("experiments_cycle_types")
+print results
+n,k,rs = compute_n_k_rs(results)
+print n, k ,rs
+print seperate_measures(results)
+
 #
 # ## weighted acbr ##
 # results = []
+# weightings = ["rf", "ada", "mi"]
 # for dataset in datasets:
 #     result = []
-#     #todo: change cycle type below
-#     result.append(test(dataset, cycle_type=""))
-#     result.append(test(dataset, cycle_type="", weighting="rf"))
-#     result.append(test(dataset, cycle_type="", weighting="adaboost"))
+#     result.append(test(dataset, cycle_type="DD"))
+#     for weighting in weightings:
+#     result.append(test(dataset, cycle_type="DD", weighting=weighting))
 #     results.append(result)
 # store_to_file(results, "experiments_weighting")
 
