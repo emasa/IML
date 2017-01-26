@@ -480,16 +480,16 @@ datasets = ["credit-a", "satimage", "nursery"]
 #datasets = ["autos", "autos", "autos"]
 
 # ## k ##
-#results = []
-# ks = [1, 3, 5, 7]
-# for dataset in datasets:
-#     result = []
-#     for k in ks:
-#         result.append(test(dataset, k=k))
-#         print "finished a k"
-#     results.append(result)
-#     print "finished a dataset"
-# store_to_file(results, "experiments_k")
+results = []
+ks = [1, 3, 5, 7]
+for dataset in datasets:
+    result = []
+    for k in ks:
+        result.append(test(dataset, k=k))
+        print "finished a k"
+    results.append(result)
+    print "finished a dataset"
+store_to_file(results, "experiments_k")
 
 #results = read_from_file("experiments_k")
 #n,k,rs = compute_n_k_rs(results)
