@@ -5,6 +5,7 @@ import time
 import pickle
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import AdaBoostClassifier
+from sklearn.feature_selection import mutual_info_classif
 from collections import Counter
 
 #1. Read and Store in CaseBase and normalize numerical attributes
@@ -269,6 +270,28 @@ class caseBasedReasoner:
         else:
             self.acbr_no_retention_phase(new_case)
 
+    # --------------------------------------------------------------------------------------------------------------#
+    # 3. Weighted ACBR with FS
+
+    def weighted_euclidian_distance(self, X1, X2):
+
+        if len(self.types) == len(self.types_numeric):
+            x, y, w = np.asarray(X1), np.asarray(X2), np.asarray(self.weights)
+            return np.linalg.norm(np.sqrt(w) * (x - y))
+
+        else:
+            dist = 0.0
+            for i in range(len(self.types)):
+                dist += self.weights[i] * self.column_distance(X1[i], X2[i], self.types[i])**2
+            return math.sqrt(dist)
+
+    def weighted_acbr_retrieval_phase(self, current_instance, k):
+        #compute euclidian distance for each case
+        dists = np.asarray([self.weighted_euclidian_distance(current_instance, case[0]) for case in self.case_memory])
+        #return the k best cases
+        return self.case_memory[np.argpartition(dists, k)[:k]]
+
+    # --------------------------------------------------------------------------------------------------------------#
 
     def test_cycle(self, test_case_base, cycle_type, k, use_weighting):
         storage = []
@@ -286,20 +309,7 @@ class caseBasedReasoner:
 
         return accuracy, efficiency, case_base_size
 
-
 #----------------------------------------------------------------------------------------------------------------------#
-    #3. Weighted ACBR with FS
-
-    def weighted_euclidian_distance(self, X1, X2):
-        pass
-
-    def weighted_acbr_retrieval_phase(self, current_instance, k):
-        #compute euclidian distance for each case
-        dists = np.asarray([self.euclidian_distance(current_instance, case[0]) for case in self.case_memory])
-        #return the k best cases
-        return self.case_memory[np.argpartition(dists, k)[:k]]
-
-
 
 def meta_info(arff_meta):
     # auxiliary function to parse (feature name, feature type[, range of values (for categorical data)])
@@ -319,8 +329,11 @@ def get_weights(data, meta_data):
     test = data[0][1]
     case_base = np.vstack([train, test])
 
+    extra_meta_data = meta_info(meta_data)
+    target_map = extra_meta_data[-1][2]
+
     X = np.asarray([case[0] for case in case_base])
-    Y = np.asarray([float(case[1][0]) for case in case_base])
+    Y = np.asarray([target_map[case[1][0]] for case in case_base])
     names = meta_data.names()
 
     rfc = RandomForestClassifier(n_estimators=20, criterion='gini', min_samples_split=2, random_state=0)
@@ -329,10 +342,16 @@ def get_weights(data, meta_data):
 
     abc = AdaBoostClassifier(base_estimator=None, n_estimators=10, learning_rate=0.6, algorithm='SAMME.R',
                              random_state=0)
-    abc.fit(X, Y, sample_weight=None);
+    abc.fit(X, Y, sample_weight=None)
     abc_feat_weights = abc.feature_importances_
 
-    return rfc_feat_weights, abc_feat_weights
+    # specify which features are discrete (nominal)
+    discrete_mask = list(np.asarray(meta_data.types()[:-1]) == 'nominal')
+    mutual_info_feat_weights = mutual_info_classif(X, Y, discrete_features=discrete_mask)
+    # normalized weights between [0, 1]
+    mutual_info_feat_weights = mutual_info_feat_weights / np.sum(mutual_info_feat_weights)
+
+    return rfc_feat_weights, abc_feat_weights, mutual_info_feat_weights
 
 #----------------------------------------------------------------------------------------------------------------------#
 #testing function
@@ -352,6 +371,9 @@ def test(data_name, cycle_type='NR', k=5, weighting=None):
         if weighting == "adaboost":
             weights = computed_weights[1]
 
+        if weighting == "infogain":
+            weights = computed_weights[2]
+
     results = []
 
     for split in data:
@@ -367,18 +389,22 @@ def test(data_name, cycle_type='NR', k=5, weighting=None):
 #UNIT TESTS
 
 #READING
-#data_name = "satimage"
-#meta, data = read_cb(data_name)
-#normalize(data, meta)
-#rfc_feat_weights, abc_feat_weights = get_weights(data, meta)
-
-#for p in sorted(enumerate(rfc_feat_weights), key=lambda x: x[1], reverse=True):
-#    print(p)
-#print "-----------------------------------"
-
-#for p in sorted(enumerate(abc_feat_weights), key=lambda x: x[1], reverse=True):
-#    print(p)
-
+# data_name = "credit-a"
+# meta, data = read_cb(data_name)
+# normalize(data, meta)
+# rfc_feat_weights, abc_feat_weights, mutual_info_feat_weights = get_weights(data, meta)
+#
+# for p in sorted(enumerate(rfc_feat_weights), key=lambda x: x[1], reverse=True):
+#     print(p)
+# print "-----------------------------------"
+#
+# for p in sorted(enumerate(abc_feat_weights), key=lambda x: x[1], reverse=True):
+#     print(p)
+# print "-----------------------------------"
+#
+# for p in sorted(enumerate(mutual_info_feat_weights), key=lambda x: x[1], reverse=True):
+#     print(p)
+# print "-----------------------------------"
 
 #types, types_numeric = meta
 #train_case_base, test_case_base, min_vals, max_vals = data[0]
