@@ -273,9 +273,6 @@ class caseBasedReasoner:
     def test_cycle(self, test_case_base, cycle_type, k, use_weighting):
         storage = []
 
-        if use_weighting:
-            self.compute_weights()
-
         start_time = time.time()
 
         for case in test_case_base:
@@ -347,6 +344,7 @@ def test(data_name, cycle_type='NR', k=3, weighting=None):
     normalize(data, meta)
 
     if weighting:
+        use_weighting = True
         computed_weights = get_weights(data, meta)
         if weighting == "rf":
             weights = computed_weights[0]
