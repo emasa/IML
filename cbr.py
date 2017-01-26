@@ -5,6 +5,7 @@ import time
 import pickle
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import AdaBoostClassifier
+from sklearn.feature_selection import mutual_info_classif
 from collections import Counter
 
 #1. Read and Store in CaseBase and normalize numerical attributes
@@ -328,8 +329,11 @@ def get_weights(data, meta_data):
     test = data[0][1]
     case_base = np.vstack([train, test])
 
+    extra_meta_data = meta_info(meta_data)
+    target_map = extra_meta_data[-1][2]
+
     X = np.asarray([case[0] for case in case_base])
-    Y = np.asarray([float(case[1][0]) for case in case_base])
+    Y = np.asarray([target_map[case[1][0]] for case in case_base])
     names = meta_data.names()
 
     rfc = RandomForestClassifier(n_estimators=20, criterion='gini', min_samples_split=2, random_state=0)
@@ -341,7 +345,13 @@ def get_weights(data, meta_data):
     abc.fit(X, Y, sample_weight=None)
     abc_feat_weights = abc.feature_importances_
 
-    return rfc_feat_weights, abc_feat_weights
+    # specify which features are discrete (nominal)
+    discrete_mask = list(np.asarray(meta_data.types()[:-1]) == 'nominal')
+    mutual_info_feat_weights = mutual_info_classif(X, Y, discrete_features=discrete_mask)
+    # normalized weights between [0, 1]
+    mutual_info_feat_weights = mutual_info_feat_weights / np.sum(mutual_info_feat_weights)
+
+    return rfc_feat_weights, abc_feat_weights, mutual_info_feat_weights
 
 #----------------------------------------------------------------------------------------------------------------------#
 #testing function
@@ -361,6 +371,9 @@ def test(data_name, cycle_type='NR', k=3, weighting=None):
         if weighting == "adaboost":
             weights = computed_weights[1]
 
+        if weighting == "infogain":
+            weights = computed_weights[2]
+
     results = []
 
     for split in data:
@@ -376,18 +389,22 @@ def test(data_name, cycle_type='NR', k=3, weighting=None):
 #UNIT TESTS
 
 #READING
-#data_name = "satimage"
-#meta, data = read_cb(data_name)
-#normalize(data, meta)
-#rfc_feat_weights, abc_feat_weights = get_weights(data, meta)
-
-#for p in sorted(enumerate(rfc_feat_weights), key=lambda x: x[1], reverse=True):
-#    print(p)
-#print "-----------------------------------"
-
-#for p in sorted(enumerate(abc_feat_weights), key=lambda x: x[1], reverse=True):
-#    print(p)
-
+# data_name = "credit-a"
+# meta, data = read_cb(data_name)
+# normalize(data, meta)
+# rfc_feat_weights, abc_feat_weights, mutual_info_feat_weights = get_weights(data, meta)
+#
+# for p in sorted(enumerate(rfc_feat_weights), key=lambda x: x[1], reverse=True):
+#     print(p)
+# print "-----------------------------------"
+#
+# for p in sorted(enumerate(abc_feat_weights), key=lambda x: x[1], reverse=True):
+#     print(p)
+# print "-----------------------------------"
+#
+# for p in sorted(enumerate(mutual_info_feat_weights), key=lambda x: x[1], reverse=True):
+#     print(p)
+# print "-----------------------------------"
 
 #types, types_numeric = meta
 #train_case_base, test_case_base, min_vals, max_vals = data[0]
@@ -463,16 +480,16 @@ datasets = ["credit-a", "satimage", "nursery"]
 #datasets = ["autos", "autos", "autos"]
 
 # ## k ##
-results = []
-ks = [1, 3, 5, 7]
-for dataset in datasets:
-    result = []
-    for k in ks:
-        result.append(test(dataset, k=k))
-        print "finished a k"
-    results.append(result)
-    print "finished a dataset"
-store_to_file(results, "experiments_k")
+#results = []
+# ks = [1, 3, 5, 7]
+# for dataset in datasets:
+#     result = []
+#     for k in ks:
+#         result.append(test(dataset, k=k))
+#         print "finished a k"
+#     results.append(result)
+#     print "finished a dataset"
+# store_to_file(results, "experiments_k")
 
 #results = read_from_file("experiments_k")
 #n,k,rs = compute_n_k_rs(results)
