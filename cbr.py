@@ -49,6 +49,63 @@ def read_cb(data_name):
     return meta_data, data
 
 
+def normalize(data, meta_data):
+    extra_meta_data = meta_info(meta_data)
+
+    # normalize the data
+    train = data[0][0]
+    test = data[0][1]
+    case_base = np.vstack([train, test])
+
+    types = np.asarray(meta_data.types())[:-1]
+    types_numeric = np.where(types == 'numeric')[0]
+
+    min_vals, max_vals = {}, {}
+    for j in types_numeric:
+        vals = [case[0][j] for case in case_base if not math.isnan(case[0][j])]
+        if vals:
+            min_val = min(vals)
+            max_val = max(vals)
+        else:
+            min_val = 0
+            max_val = 1
+
+        for (train_case_base, test_case_base) in data:
+            for k in range(len(train_case_base)):
+                if not math.isnan(train_case_base[k][0][j]):
+                    train_case_base[k][0][j] = (float(train_case_base[k][0][j]) - min_val) / (max_val - min_val)
+                else:
+                    train_case_base[k][0][j] = (max_val + min_val)/2
+
+            for k in range(len(test_case_base)):
+                if not math.isnan(test_case_base[k][0][j]):
+                    test_case_base[k][0][j] = (float(test_case_base[k][0][j]) - min_val) / (max_val - min_val)
+                else:
+                    test_case_base[k][0][j] = (max_val + min_val)/2
+
+        # store min_val and max_val for later use
+        min_vals[j] = min_val
+        max_vals[j] = max_val
+
+    types_nominal = np.where(types == 'nominal')[0]
+    for j in types_nominal:
+        categories = extra_meta_data[j][2]
+        for (train_case_base, test_case_base) in data:
+            for k in range(len(train_case_base)):
+                key = train_case_base[k][0][j]
+                if key != "?":
+                    train_case_base[k][0][j] = categories[key]
+                else:
+                    train_case_base[k][0][j] = -1
+
+            for k in range(len(test_case_base)):
+                key = test_case_base[k][0][j]
+                if key != "?":
+                    test_case_base[k][0][j] = categories[key]
+                else:
+                    test_case_base[k][0][j] = -1
+
+
 #for future generations
 #def normalize(self, case):
     #for j in self.types_numeric:
@@ -56,8 +113,9 @@ def read_cb(data_name):
     #return case
 
 
-#--------------------------------------------------------------------------------------------------------------#
+#----------------------------------------------------------------------------------------------------------------------#
 #2. Case Based Reasoner
+
 class caseBasedReasoner:
 
     def __init__(self, train_case_base, meta_data, weights):
@@ -200,7 +258,7 @@ class caseBasedReasoner:
         self.acbr_revision_phase(new_case, prediction, storage)
 
         if use_oblivion:
-            self.acbr_review_phase(new_case, candidates, 0.5)
+            self.acbr_review_phase(new_case, candidates, 0.2)
 
         if retention_strategy == "DS":
             self.acbr_always_retention_phase(new_case)
@@ -210,7 +268,6 @@ class caseBasedReasoner:
             self.acbr_de_retention_phase(new_case, candidates, prediction)
         else:
             self.acbr_no_retention_phase(new_case)
-
 
     # --------------------------------------------------------------------------------------------------------------#
     # 3. Weighted ACBR with FS
@@ -251,32 +308,7 @@ class caseBasedReasoner:
 
         return accuracy, efficiency, case_base_size
 
-
-def test(data_name, cycle_type='NR', k=3, weighting=None):
-    meta, data = read_cb(data_name)
-    weights = [1]*len(meta.types())
-    use_weighting = False
-    normalize(data, meta)
-
-    if weighting:
-        computed_weights = get_weights(data, meta)
-        use_weighting = True
-        if weighting == "rf":
-            weights = computed_weights[0]
-
-        if weighting == "adaboost":
-            weights = computed_weights[1]
-
-    results = []
-
-    for split in data:
-        train_case_base, test_case_base = split
-        cbr = caseBasedReasoner(train_case_base, meta, weights)
-        results.append(cbr.test_cycle(test_case_base, cycle_type, k, use_weighting))
-
-    results = np.asarray(results)
-    return results.mean(0)
-
+#----------------------------------------------------------------------------------------------------------------------#
 
 def meta_info(arff_meta):
     # auxiliary function to parse (feature name, feature type[, range of values (for categorical data)])
@@ -289,63 +321,6 @@ def meta_info(arff_meta):
                      for n_t_r in final_lines]
 
     return final_mapping
-
-
-def normalize(data, meta_data):
-    extra_meta_data = meta_info(meta_data)
-
-    # normalize the data
-    train = data[0][0]
-    test = data[0][1]
-    case_base = np.vstack([train, test])
-
-    types = np.asarray(meta_data.types())[:-1]
-    types_numeric = np.where(types == 'numeric')[0]
-
-    min_vals, max_vals = {}, {}
-    for j in types_numeric:
-        vals = [case[0][j] for case in case_base if not math.isnan(case[0][j])]
-        if vals:
-            min_val = min(vals)
-            max_val = max(vals)
-        else:
-            min_val = 0
-            max_val = 1
-
-        for (train_case_base, test_case_base) in data:
-            for k in range(len(train_case_base)):
-                if not math.isnan(train_case_base[k][0][j]):
-                    train_case_base[k][0][j] = (float(train_case_base[k][0][j]) - min_val) / (max_val - min_val)
-                else:
-                    train_case_base[k][0][j] = (max_val + min_val)/2
-
-            for k in range(len(test_case_base)):
-                if not math.isnan(test_case_base[k][0][j]):
-                    test_case_base[k][0][j] = (float(test_case_base[k][0][j]) - min_val) / (max_val - min_val)
-                else:
-                    test_case_base[k][0][j] = (max_val + min_val)/2
-
-        # store min_val and max_val for later use
-        min_vals[j] = min_val
-        max_vals[j] = max_val
-
-    types_nominal = np.where(types == 'nominal')[0]
-    for j in types_nominal:
-        categories = extra_meta_data[j][2]
-        for (train_case_base, test_case_base) in data:
-            for k in range(len(train_case_base)):
-                key = train_case_base[k][0][j]
-                if key != "?":
-                    train_case_base[k][0][j] = categories[key]
-                else:
-                    train_case_base[k][0][j] = -1
-
-            for k in range(len(test_case_base)):
-                key = test_case_base[k][0][j]
-                if key != "?":
-                    test_case_base[k][0][j] = categories[key]
-                else:
-                    test_case_base[k][0][j] = -1
 
 
 def get_weights(data, meta_data):
@@ -368,7 +343,37 @@ def get_weights(data, meta_data):
 
     return rfc_feat_weights, abc_feat_weights
 
-##### UNIT TESTS #####
+#----------------------------------------------------------------------------------------------------------------------#
+#testing function
+
+def test(data_name, cycle_type='NR', k=3, weighting=None):
+    meta, data = read_cb(data_name)
+    weights = [1]*len(meta.types())
+    use_weighting = False
+    normalize(data, meta)
+
+    if weighting:
+        use_weighting = True
+        computed_weights = get_weights(data, meta)
+        if weighting == "rf":
+            weights = computed_weights[0]
+
+        if weighting == "adaboost":
+            weights = computed_weights[1]
+
+    results = []
+
+    for split in data:
+        train_case_base, test_case_base = split
+        cbr = caseBasedReasoner(train_case_base, meta, weights)
+        results.append(cbr.test_cycle(test_case_base, cycle_type, k, use_weighting))
+
+    results = np.asarray(results)
+    return results.mean(0)
+
+
+#----------------------------------------------------------------------------------------------------------------------#
+#UNIT TESTS
 
 #READING
 #data_name = "satimage"
@@ -420,13 +425,12 @@ def get_weights(data, meta_data):
 
 #test_cycle(), test()
 #print cbr.test_cycle(test_case_base, 'acbr')
-print test("autos", "DDO")
+#print test("autos", "NR")
 #print cbr.case_memory[-1]
 
 
-
-##### COMPARISONS #####
-datasets = ["credit-a", "satimage", "nursery"]
+#----------------------------------------------------------------------------------------------------------------------#
+#COMPARISONS
 
 def store_to_file(data, filename):
     with open(filename, 'wb') as file:
@@ -436,31 +440,67 @@ def read_from_file(filename):
     with open(filename, 'rb') as file:
         return pickle.load(file)
 
-def friedman_test(results, critical_level):
+def compute_n_k_rs(results):
     n = len(results)
+    print n
     k = len(results[0])
-    xi = 12*n / k*(k-1)
+    print k
+    rs = [1.0 * sum([result[i][0] for result in results]) / n for i in range(k)]
+    print rs
+    return n, k, rs
 
+def friedman_test(results):
+    n, k, rs = compute_n_k_rs(results)
+    sum = reduce(lambda x,y: x+y**2, rs, [])
+    xi = (sum-(1.0*k*(k+1)**2)/4) * 12*n / (k*(k-1))
+    return ((n-1)*xi) / (n*(k-1)-xi)
 
 def nemenyi_test(results, critical_level):
-    pass
+    n, k, rs = compute_n_k_rs(results)
+    return critical_level * math.sqrt(k*(k+1)/(6*n))
 
-## k ##
-#results = []
+datasets = ["credit-a", "satimage", "nursery"]
+#datasets = ["autos", "autos", "autos"]
 
-#variables subject to testing
-#ks = [1, 3, 5, 7]
+# ## k ##
+results = []
+ks = [1, 3, 5, 7]
+for dataset in datasets:
+    result = []
+    for k in ks:
+        result.append(test(dataset, k=k))
+        print "finished a k"
+    results.append(result)
+    print "finished a dataset"
+store_to_file(results, "experiments_k")
 
-#for dataset in datasets:
-    #result = []
-    #for k in ks:
-        #result.append(test(dataset, k=k))
-    #results.append(result)
+#results = read_from_file("experiments_k")
+#n,k,rs = compute_n_k_rs(results)
 
-#store_to_file(results, "experiments_k")
+#
+# ## cycle types ##
+# results = []
+# cycle_types = ["NR", "DS", "DD", "DE", "DD-O", "DE-O"]
+# for dataset in datasets:
+#     result = []
+#     for type in cycle_types:
+#         result.append(test(dataset, cycle_type=type))
+#     results.append(result)
+# store_to_file(results, "experiments_cycle_types")
+#
+# ## weighted acbr ##
+# results = []
+# for dataset in datasets:
+#     result = []
+#     #todo: change cycle type below
+#     result.append(test(dataset, cycle_type=""))
+#     result.append(test(dataset, cycle_type="", weighting="rf"))
+#     result.append(test(dataset, cycle_type="", weighting="adaboost"))
+#     results.append(result)
+# store_to_file(results, "experiments_weighting")
 
-## cycle types ##
-#cycle_types = ["NR", "DS", "DD", "DE", "DD-O", "DE-O"]
+
+
 
 #test = [[0, 1, 2], ['a', 'b', 'c']]
 #store_to_file(test, "test")
